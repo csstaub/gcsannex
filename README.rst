@@ -119,3 +119,8 @@ Optional settings
 .. _chunking: http://git-annex.branchable.com/chunking/
 .. _`location strings`: https://cloud.google.com/storage/docs/bucket-locations
 .. _`storage class`: https://cloud.google.com/storage/docs/storage-classes
+
+Development
+===========
+
+To debug errors, run `git annex` with the `--debug` flag.
