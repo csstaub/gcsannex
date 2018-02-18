@@ -66,7 +66,7 @@ def relay_errors(cmd, argspecs=(), reraise=False):
                 return f(self, *args, **kwargs)
             except StdinClosedError:
                 raise
-            except Exception, e:
+            except Exception as e:
                 for line in traceback.format_exc().splitlines():
                     self.debug(line)
                 argv = [cmd]
@@ -251,7 +251,7 @@ class GCSSpecialRemote(BaseSpecialRemote):
     def _authenticate(self):
         email, escaped_private_key = self.getcreds(self._creds_setting)
         credentials = SignedJwtAssertionCredentials(email,
-                escaped_private_key.replace('*', '\n'), self.OAUTH_SCOPE)
+                escaped_private_key.replace('*', '\n').encode('ascii'), self.OAUTH_SCOPE)
         http = httplib2.Http(timeout=self.TIMEOUT)
         self._service = googleapiclient.discovery.build('storage', 'v1',
                 http=http, credentials=credentials)
@@ -288,7 +288,7 @@ class GCSSpecialRemote(BaseSpecialRemote):
                     storageClass=self._storageclass,
                 ),
             ).execute(num_retries=self.RETRIES)
-        except googleapiclient.errors.HttpError, e:
+        except googleapiclient.errors.HttpError as e:
             if e.resp.status == 409:
                 # Bucket already exists, or some other conflict.
                 # Ensure we have access to the bucket and that its
@@ -303,6 +303,11 @@ class GCSSpecialRemote(BaseSpecialRemote):
                     raise ValueError('Bucket storage class "' +
                             metadata['storageClass'] + '" cannot be changed')
             else:
+                if 'Invalid argument' in str(e):
+                    raise RuntimeError('Invalid argument in Google API request.'
+                                       ' Ensure that you are using the correct '
+                                       'project-ID (not the user-friendly '
+                                       'name chosen).')
                 raise
 
         self.send('INITREMOTE-SUCCESS')
@@ -324,7 +329,7 @@ class GCSSpecialRemote(BaseSpecialRemote):
         for i in range(self.RETRIES + 1):
             try:
                 return fn()
-            except (socket.timeout, ssl.SSLError), e:
+            except (socket.timeout, ssl.SSLError) as e:
                 # Timeouts under SSL look like SSLErrors, but not all
                 # SSLErrors are timeouts.  Retry, a finite number of times,
                 # with backoff.
@@ -380,7 +385,7 @@ class GCSSpecialRemote(BaseSpecialRemote):
             bucket=self._bucket,
             object=self._object_name(key),
         )
-        with open(file, 'w') as fh:
+        with open(file, 'wb') as fh:
             downloader = googleapiclient.http.MediaIoBaseDownload(fh, req,
                     chunksize=self.CHUNK_SIZE)
             done = False
@@ -404,7 +409,7 @@ class GCSSpecialRemote(BaseSpecialRemote):
                 fields='name',
             ).execute(num_retries=self.RETRIES)
             self.send('CHECKPRESENT-SUCCESS', key)
-        except googleapiclient.errors.HttpError, e:
+        except googleapiclient.errors.HttpError as e:
             if e.resp.status == 404:
                 if self._everpublic:
                     self.send('SETURLMISSING', key, self._object_url(key))
@@ -420,7 +425,7 @@ class GCSSpecialRemote(BaseSpecialRemote):
                 bucket=self._bucket,
                 object=self._object_name(key),
             ).execute(num_retries=self.RETRIES)
-        except googleapiclient.errors.HttpError, e:
+        except googleapiclient.errors.HttpError as e:
             if e.resp.status != 404:
                 raise
         if self._everpublic:
