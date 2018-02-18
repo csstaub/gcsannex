@@ -35,12 +35,13 @@ try:
     import googleapiclient.discovery
     import googleapiclient.errors
     import googleapiclient.http
-    import httplib2
-    from oauth2client.service_account import ServiceAccountCredentials
     logging.getLogger('googleapicliet.discovery_cache').setLevel(logging.ERROR)
     have_google_api = True
 except ImportError:
     have_google_api = False
+import httplib2
+import oauth2client
+from oauth2client.service_account import ServiceAccountCredentials
 
 
 __version__ = '0.3'
@@ -146,13 +147,32 @@ class BaseSpecialRemote(object):
             raise NoSettingError('Missing setting: ' + setting)
         return argstr or default
 
+    def initcreds(self, setting):
+        creds_file = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')
+        if creds_file and creds_file.strip() != '':
+            with open(creds_file) as fh:
+                creds = fh.read()
+            hexcreds = binascii.b2a_hex(creds)
+            self.send('SETCREDS', setting, hexcreds)
+
+        try:
+            self._authenticate()
+        except NoSettingError:
+            raise ValueError(
+                'No stored credentials and '
+                'GOOGLE_APPLICATION_CREDENTIALS not set'
+            )
+
     def getcreds(self, setting):
         self.send('GETCREDS', setting)
         response_cmd, hexcreds = self._recv()
         assert response_cmd.upper() == 'CREDS', 'Response not CREDS'
-        if not hexcreds:
+        if not hexcreds or hexcreds.strip() == '':
             raise NoSettingError('Missing credentials: ' + setting)
-        return json.loads(binascii.a2b_hex(hexcreds.strip()))
+        try:
+            return json.loads(binascii.a2b_hex(hexcreds.strip()))
+        except Exception, e:
+            raise Exception('Unable to load JSON credentials')
 
     def geturls(self, key, prefix=''):
         self.send('GETURLS', key, prefix)
@@ -250,36 +270,28 @@ class GCSSpecialRemote(BaseSpecialRemote):
         return self._uuid + '-creds-v2'
 
     def _authenticate(self):
+        oauth2client_major_version = int(oauth2client.__version__.split('.')[0])
+        cache_discovery = oauth2client_major_version < 4
         credentials = ServiceAccountCredentials.from_json_keyfile_dict(
             self.getcreds(self._creds_setting),
             scopes=self.OAUTH_SCOPE,
         )
-        http = httplib2.Http(timeout=self.TIMEOUT)
-        self._service = googleapiclient.discovery.build(
-            'storage',
-            'v1',
-            http=http,
-            credentials=credentials
-        )
+        try:
+            self._service = googleapiclient.discovery.build(
+                'storage',
+                'v1',
+                credentials=credentials,
+                cache_discovery=cache_discovery
+            )
+        except:
+            e = sys.exc_info()[0]
+            raise Exception('Got error: ' + e.str())
 
     @relay_errors('INITREMOTE-FAILURE', [Exception])
     def INITREMOTE(self):
         self._init()
+        self.initcreds(self._creds_setting)
 
-        creds_file = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')
-        if creds_file:
-            with open(creds_file) as fh:
-                creds = fh.read()
-            hexcreds = binascii.b2a_hex(creds)
-            self.send('SETCREDS', self._creds_setting, hexcreds)
-
-        try:
-            self._authenticate()
-        except NoSettingError:
-            raise ValueError(
-                'No stored credentials and '
-                'GOOGLE_APPLICATION_CREDENTIALS not set'
-            )
         try:
             self._service.buckets().insert(
                 project=self._project,
@@ -318,7 +330,7 @@ class GCSSpecialRemote(BaseSpecialRemote):
     @relay_errors('PREPARE-FAILURE', [Exception])
     def PREPARE(self):
         self._init()
-        self._authenticate()
+        self.initcreds(self._creds_setting)
         self.send('PREPARE-SUCCESS')
 
     def _object_name(self, key):
