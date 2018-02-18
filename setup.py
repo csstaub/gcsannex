@@ -64,6 +64,7 @@ setup(
     keywords='git-annex gcs Google Cloud Storage',
     install_requires=[
         'google-api-python-client',
+        'oauth2client<4.0.0'
         'PyCrypto',
     ],
     py_modules=[
